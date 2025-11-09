@@ -1,0 +1,324 @@
+#include <SPI.h>
+#include <MFRC522.h>
+#include <LiquidCrystal_I2C.h>
+
+// LCD and RFID setup
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+#define SS_PIN 10
+#define RST_PIN 9
+MFRC522 mfrc522(SS_PIN, RST_PIN);
+
+// Button and Buzzer Pins
+const int remove_button = 2;
+const int add_button = 3;
+const int reset_button = 4;
+const int buzzer_Pin = 5;
+
+// Item Structure
+struct item {
+  String item_name;
+  String item_number;
+  int item_price;
+};
+
+// Item Database
+const int number_of_item = 4;
+const item item_list[number_of_item] = {
+  {"Tata salt",      "FD 02 FA 03", 100},
+  {"Milk",           "6F FA E3 C4",  50},
+  {"Bournvita",      "69 9B 99 94", 150},
+  {"Protein Powder", "B9 7F 95 94", 200}
+};
+
+// Variables
+int bill_amount = 0;
+int add_item_flag = 1;
+int remove_item_flag = 0;
+
+// Store quantity of each item in cart
+int item_count[number_of_item] = {0, 0, 0, 0};
+
+// Function to print full cart on Serial Monitor
+void printCartToSerial() {
+  Serial.println("\n CART SUMMARY");
+  for (int i = 0; i < number_of_item; i++) {
+    if (item_count[i] > 0) {
+      Serial.print(item_list[i].item_name);
+      Serial.print(" | Qty: ");
+      Serial.print(item_count[i]);
+      Serial.print(" | Subtotal: ");
+      Serial.println(item_count[i] * item_list[i].item_price);
+    }
+  }
+  Serial.print("Total Bill: ");
+  Serial.println(bill_amount);
+  Serial.println("---------------------------\n");
+}
+// -------------------------------------------------------------------
+
+void setup() {
+  pinMode(remove_button, INPUT);
+  pinMode(reset_button, INPUT);
+  pinMode(add_button, INPUT);
+  pinMode(buzzer_Pin, OUTPUT);
+
+  Serial.begin(9600);
+  SPI.begin();
+  mfrc522.PCD_Init();
+
+  lcd.init();
+  lcd.backlight();
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Smart Trolley");
+  lcd.setCursor(0, 1);
+  lcd.print("Billing System");
+  delay(2000);
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Start purchasing");
+  lcd.setCursor(0, 1);
+  lcd.print("your item");
+
+  Serial.println("\n=== Smart Trolley System Started ===");
+  Serial.println("Scan RFID cards to add/remove items.");
+  Serial.println("Press buttons to switch between modes.");
+}
+
+void loop() {
+  int remove_buttonState = digitalRead(remove_button);
+  int add_buttonState = digitalRead(add_button);
+  int reset_buttonState = digitalRead(reset_button);
+
+  // Mode Selection
+  if (remove_buttonState) {
+    // Check if cart is empty before enabling Remove Mode
+    bool isCartEmpty = true;
+    for (int i = 0; i < number_of_item; i++) {
+      if (item_count[i] > 0) {
+        isCartEmpty = false;
+        break;
+      }
+    }
+
+    if (isCartEmpty) {
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Cart is Empty!");
+      lcd.setCursor(0, 1);
+      lcd.print("Can't Remove");
+      Serial.println("[X] Cannot enter REMOVE mode — cart is empty!");
+
+      // Beep 2 times
+      for (int j = 0; j < 2; j++) {
+        digitalWrite(buzzer_Pin, HIGH);
+        delay(200);
+        digitalWrite(buzzer_Pin, LOW);
+        delay(200);
+      }
+
+      delay(1500);
+    } else {
+      add_item_flag = 0;
+      remove_item_flag = 1;
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Remove Mode ON");
+      Serial.println(">> Mode: REMOVE");
+      delay(1500);
+    }
+  } 
+  else if (add_buttonState) {
+    add_item_flag = 1;
+    remove_item_flag = 0;
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Add Mode ON");
+    Serial.println(">> Mode: ADD");
+    delay(1500);
+  } 
+  else if (reset_buttonState) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Resetting Data...");
+    Serial.println("\n[!] Resetting all data...");
+    delay(2000);
+
+    // Reset all data
+    bill_amount = 0;
+    for (int i = 0; i < number_of_item; i++) item_count[i] = 0;
+
+    // Show "Trolley is Empty"
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Trolley is Empty");
+    Serial.println("[✓] Cart cleared successfully.\n");
+
+    // Beep once to confirm reset
+    digitalWrite(buzzer_Pin, HIGH);
+    delay(200);
+    digitalWrite(buzzer_Pin, LOW);
+
+    delay(5000);  // Wait 5 seconds before returning
+
+    // Return to welcome screen
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Smart Trolley");
+    lcd.setCursor(0, 1);
+    lcd.print("Billing System");
+    delay(2000);
+
+    // Back to start purchasing screen
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Start purchasing");
+    lcd.setCursor(0, 1);
+    lcd.print("your item");
+    delay(1000);
+  }
+
+  // RFID Reading
+  if (!mfrc522.PICC_IsNewCardPresent()) return;
+  if (!mfrc522.PICC_ReadCardSerial()) return;
+
+  // Read UID
+  String content = "";
+  for (byte i = 0; i < mfrc522.uid.size; i++) {
+    content.concat(String(mfrc522.uid.uidByte[i] < 0x10 ? " 0" : " "));
+    content.concat(String(mfrc522.uid.uidByte[i], HEX));
+  }
+  content.toUpperCase();
+
+  Serial.println("\nDetected UID: " + content);
+
+  // Check against item list
+  bool found = false;
+  for (int i = 0; i < number_of_item; i++) {
+    if (content.substring(1) == item_list[i].item_number) {
+      found = true;
+
+      // ADD ITEM
+      if (add_item_flag == 1) {
+        item_count[i] += 1;
+        bill_amount += item_list[i].item_price;
+
+        digitalWrite(buzzer_Pin, HIGH);
+        delay(200);
+        digitalWrite(buzzer_Pin, LOW);
+
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Added: ");
+        lcd.print(item_list[i].item_name);
+        lcd.setCursor(0, 1);
+        lcd.print("Qty:");
+        lcd.print(item_count[i]);
+        lcd.print(" Total:");
+        lcd.print(item_list[i].item_price * item_count[i]);
+
+        Serial.print("[+] Added: ");
+        Serial.print(item_list[i].item_name);
+        Serial.print(" | New Qty: ");
+        Serial.print(item_count[i]);
+        Serial.print(" | Bill: ");
+        Serial.println(bill_amount);
+
+        printCartToSerial();
+        delay(1500);
+      }
+
+      // REMOVE ITEM
+      else if (remove_item_flag == 1) {
+        // Check if cart is empty before removal
+        if (bill_amount <= 0) {
+          lcd.clear();
+          lcd.setCursor(0, 0);
+          lcd.print("Cart Empty!");
+          lcd.setCursor(0, 1);
+          lcd.print("Nothing to Remove");
+          Serial.println("[X] Tried to remove but cart is empty!");
+
+          // Beep 3 times
+          for (int j = 0; j < 3; j++) {
+            digitalWrite(buzzer_Pin, HIGH);
+            delay(200);
+            digitalWrite(buzzer_Pin, LOW);
+            delay(200);
+          }
+
+          delay(1500);
+          break;
+        }
+
+        if (item_count[i] > 0) {
+          item_count[i] -= 1;
+          bill_amount -= item_list[i].item_price;
+
+          digitalWrite(buzzer_Pin, HIGH);
+          delay(200);
+          digitalWrite(buzzer_Pin, LOW);
+
+          lcd.clear();
+          lcd.setCursor(0, 0);
+          lcd.print("Removed: ");
+          lcd.print(item_list[i].item_name);
+          lcd.setCursor(0, 1);
+          lcd.print("Qty left: ");
+          lcd.print(item_count[i]);
+
+          Serial.print("[-] Removed: ");
+          Serial.print(item_list[i].item_name);
+          Serial.print(" | Remaining Qty: ");
+          Serial.print(item_count[i]);
+          Serial.print(" | Bill: ");
+          Serial.println(bill_amount);
+
+          printCartToSerial();
+          delay(1500);
+        } else {
+          // Buzzer beeps 3 times when no item to remove
+          for (int j = 0; j < 3; j++) {
+            digitalWrite(buzzer_Pin, HIGH);
+            delay(200);
+            digitalWrite(buzzer_Pin, LOW);
+            delay(200);
+          }
+
+          lcd.clear();
+          lcd.setCursor(0, 0);
+          lcd.print(item_list[i].item_name);
+          lcd.setCursor(0, 1);
+          lcd.print("Not in cart!");
+          Serial.print("[X] ERROR: Tried to remove ");
+          Serial.print(item_list[i].item_name);
+          Serial.println(" but it's not in the cart!");
+          delay(1500);
+        }
+      }
+      break;
+    }
+  }
+
+  if (!found) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Unknown RFID");
+    Serial.println("[!] Unknown RFID tag scanned!");
+    delay(1500);
+  }
+
+  // Show total
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Total Bill:");
+  lcd.setCursor(0, 1);
+  lcd.print(bill_amount);
+  lcd.print(" Rs");
+
+  Serial.print("Current Total: ");
+  Serial.print(bill_amount);
+  Serial.println(" Rs\n---------------------------");
+  delay(2000);
+}

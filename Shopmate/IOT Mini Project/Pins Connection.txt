@@ -1,0 +1,29 @@
+#RFID Connection
+RFID PIN    ARDUINO PIN 
+SDA         D10
+SCK         D13
+MOSI        D11
+MISO        D12
+GND         GND
+RST         D9
+3.3v        3.3v
+
+#LCD Connection
+LCD PIN   ARDUINO PIN
+SCL       A5
+SDA       A4
+VCC       5v
+GND       GND
+
+#Buzzer Connection
+Buzzer PIN   ARDUINO PIN
+Positive     5
+GND          GND 
+
+#Button Connection
+Button PIN   ARDUINO PIN
+Remove_Button     D2
+Add_button         D3
+Reset_button       D4
+VCC          5v
+GND          GND 
